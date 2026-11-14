@@ -5,11 +5,11 @@ Unofficial command-line access to Outlook (Microsoft 365) mail and calendar, usi
 It reads mail, searches, reads the calendar and attachments, and saves drafts. **It never sends mail**: there is no send code path, and draft commands do nothing without `--yes`.
 
 ```bash
-outlook-web auth chrome --account work --cdp-port 9230
-outlook-web messages --account work --unread --limit 10
-outlook-web read --account work --id AAMkAG...
-outlook-web agenda --today
-outlook-web draft-reply --account work --id AAMkAG... --reply-all --body "Thanks, done." --yes
+outlook-web-cli auth chrome --account work --cdp-port 9230
+outlook-web-cli messages --account work --unread --limit 10
+outlook-web-cli read --account work --id AAMkAG...
+outlook-web-cli agenda --today
+outlook-web-cli draft-reply --account work --id AAMkAG... --reply-all --body "Thanks, done." --yes
 ```
 
 ## Install
@@ -17,22 +17,22 @@ outlook-web draft-reply --account work --id AAMkAG... --reply-all --body "Thanks
 Needs Node.js 22 or newer.
 
 ```bash
-npm install -g https://github.com/andrewfurman/outlook-web-cli/archive/refs/tags/v0.1.0.tar.gz
-outlook-web help
+npm install -g https://github.com/andrewfurman/outlook-web-cli/archive/refs/tags/v0.2.0.tar.gz
+outlook-web-cli help
 ```
 
 Or from a checkout: `npm install && npm link`.
 
 ## Signing in: how the web session works
 
-Outlook web is a single-page app that signs in with Microsoft's MSAL library. Two things in your browser keep you signed in, and `outlook-web` saves and uses both, the same way the web app does:
+Outlook web is a single-page app that signs in with Microsoft's MSAL library. Two things in your browser keep you signed in, and `outlook-web-cli` saves and uses both, the same way the web app does:
 
-| What | Lifetime | How outlook-web uses it |
+| What | Lifetime | How outlook-web-cli uses it |
 | --- | --- | --- |
 | Outlook web's **refresh token** (in the page's local storage) | 24 hours from sign-in (Microsoft's fixed limit for single-page apps) | Redeemed at `login.microsoftonline.com` with Outlook's `Origin`, for a 60–90 minute access token |
 | Microsoft's **sign-in cookies** (`ESTSAUTHPERSISTENT` on `login.microsoftonline.com`) | Months, when "Stay signed in" was chosen | A silent sign-in (`prompt=none` + PKCE), exactly like Outlook web's hidden renewal iframe, gives a new refresh token and renewed cookies |
 
-The access token is for `https://outlook.office.com` with the web app's own `Mail.ReadWrite` and `Calendars` scopes, and calls go to the Outlook REST API. Each call uses the saved access token while it's valid, then the refresh token, then the cookies. Run `outlook-web auth refresh --all --rotate` from cron every few hours to keep the cookies renewed.
+The access token is for `https://outlook.office.com` with the web app's own `Mail.ReadWrite` and `Calendars` scopes, and calls go to the Outlook REST API. Each call uses the saved access token while it's valid, then the refresh token, then the cookies. Run `outlook-web-cli auth refresh --all --rotate` from cron every few hours to keep the cookies renewed.
 
 ### Import from Chrome
 
@@ -40,10 +40,10 @@ Start Chrome with a DevTools port, sign in to Outlook web there (tick "Stay sign
 
 ```bash
 google-chrome --remote-debugging-port=9230 --user-data-dir="$HOME/.chrome-outlook" https://outlook.cloud.microsoft/mail/
-outlook-web auth chrome --account work --cdp-port 9230
+outlook-web-cli auth chrome --account work --cdp-port 9230
 ```
 
-The port is remembered. If the saved session ever stops working, `outlook-web` re-imports from that Chrome automatically. If that Chrome isn't running, it goes straight to "needs sign-in".
+The port is remembered. If the saved session ever stops working, `outlook-web-cli` re-imports from that Chrome automatically. If that Chrome isn't running, it goes straight to "needs sign-in".
 
 For a second mailbox open in the same Chrome profile (`https://outlook.cloud.microsoft/mail/you@other.com/`), pass `--mailbox-url` so the right tab is picked.
 
@@ -52,7 +52,7 @@ For a second mailbox open in the same Chrome profile (`https://outlook.cloud.mic
 Export the cookies for `login.microsoftonline.com` with a cookie-export extension, either as Cookie-Editor JSON or as a Netscape `cookies.txt`:
 
 ```bash
-outlook-web auth cookies --account work --file ~/Downloads/cookies.json --username me@contoso.com
+outlook-web-cli auth cookies --account work --file ~/Downloads/cookies.json --username me@contoso.com
 rm ~/Downloads/cookies.json
 ```
 
@@ -61,9 +61,9 @@ Only the `login.microsoftonline.com` cookies are kept.
 ### Check and renew
 
 ```bash
-outlook-web auth status          # per account: token minutes left, refresh-token hours left, cookie expiry
-outlook-web auth refresh --all   # mint fresh tokens now; --rotate also renews the sign-in cookies
-outlook-web auth logout --account work
+outlook-web-cli auth status          # per account: token minutes left, refresh-token hours left, cookie expiry
+outlook-web-cli auth refresh --all   # mint fresh tokens now; --rotate also renews the sign-in cookies
+outlook-web-cli auth logout --account work
 ```
 
 ## Where things are stored

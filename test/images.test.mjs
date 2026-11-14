@@ -3,7 +3,7 @@ import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-process.env.OUTLOOK_WEB_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "outlook-web-test-"));
+process.env.OUTLOOK_WEB_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "outlook-web-cli-test-"));
 const { configureAccounts } = await import("../src/accounts.mjs");
 configureAccounts([
   { name: "contoso", aliases: ["contoso.com", "contoso work"], username: "me@contoso.com" },

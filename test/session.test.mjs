@@ -71,7 +71,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 process.env.OUTLOOK_WEB_LOGIN_BASE_URL = `http://127.0.0.1:${server.address().port}`;
-process.env.OUTLOOK_WEB_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "outlook-web-session-"));
+process.env.OUTLOOK_WEB_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "outlook-web-cli-session-"));
 
 const session = await import("../src/session.mjs");
 const { configureAccounts } = await import("../src/accounts.mjs");
