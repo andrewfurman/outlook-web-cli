@@ -895,7 +895,7 @@ function noDraftToken(target) {
     ok: false,
     status: "needs_sign_in",
     account: target.label,
-    answer_text: `The ${target.label} Outlook session has no token that can save drafts. Run outlook-web auth status, then sign in again (outlook-web auth chrome or auth cookies).`,
+    answer_text: `The ${target.label} Outlook session has no token that can save drafts. Run outlook-web-cli auth status, then sign in again (outlook-web-cli auth chrome or auth cookies).`,
   };
 }
 
@@ -942,7 +942,7 @@ async function resolveAccounts(scope) {
   const s = normalizeString(scope).toLowerCase() === "all" ? "all" : (resolveAccountAlias(scope) || normalizeString(scope));
   const all = listAccounts();
   if (!s || s === "all") {
-    if (!all.length) throw new Error("No Outlook accounts are set up. Run `outlook-web auth chrome --account <name> --cdp-port <port>` first.");
+    if (!all.length) throw new Error("No Outlook accounts are set up. Run `outlook-web-cli auth chrome --account <name> --cdp-port <port>` first.");
     return all;
   }
   const conf = getAccount(s);

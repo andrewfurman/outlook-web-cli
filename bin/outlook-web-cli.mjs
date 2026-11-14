@@ -17,29 +17,29 @@ import {
 } from "../src/index.mjs";
 import { openRouterVisionAnalyzer } from "../src/vision.mjs";
 
-const HELP = `outlook-web: Outlook mail and calendar from the command line, through your Outlook web session.
+const HELP = `outlook-web-cli: Outlook mail and calendar from the command line, through your Outlook web session.
 
 Sign in (once per account; the session is saved to ${path.join("~", ".config", "outlook-web-cli")}):
-  outlook-web auth chrome  --account work --cdp-port 9230 [--mailbox-url URL]
+  outlook-web-cli auth chrome  --account work --cdp-port 9230 [--mailbox-url URL]
                            import from a Chrome where Outlook web is open (started with --remote-debugging-port)
-  outlook-web auth cookies --account work --file cookies.json [--username me@contoso.com]
+  outlook-web-cli auth cookies --account work --file cookies.json [--username me@contoso.com]
                            import login.microsoftonline.com cookies exported from any browser (JSON or cookies.txt; - = stdin)
-  outlook-web auth status  [--account work]
-  outlook-web auth refresh [--account work | --all] [--rotate]   mint a fresh token; --rotate also renews the sign-in cookies
-  outlook-web auth logout  --account work
+  outlook-web-cli auth status  [--account work]
+  outlook-web-cli auth refresh [--account work | --all] [--rotate]   mint a fresh token; --rotate also renews the sign-in cookies
+  outlook-web-cli auth logout  --account work
 
 Mail and calendar (read-only, plus drafts; nothing ever sends mail):
-  outlook-web accounts
-  outlook-web status      [--account work|all]
-  outlook-web messages    [--account all] [--limit 20] [--unread] [--from addr] [--since 2026-11-01] [--folder inbox|sent|drafts|archive]
-  outlook-web search      --query "invoice" [--account all] [--limit 20]
-  outlook-web read        --account work --id MESSAGE_ID [--max-body-chars 20000]
-  outlook-web agenda      [--account all] [--today | --tomorrow | --start-date D --end-date D]
-  outlook-web attachments --account work --id MESSAGE_ID [--include-data] [--images-only] [--index N] [--offset N --length N]
-  outlook-web attachment-inspect --account work --id MESSAGE_ID [--index N] [--prompt TEXT]   (needs OPENROUTER_API_KEY)
-  outlook-web draft-new   --account work --to a@b.com --subject S --body TEXT --yes
-  outlook-web draft-reply --account work --id MESSAGE_ID --body TEXT [--reply-all] [--add-to x@y.com] --yes
-  outlook-web draft-delete --account work --id DRAFT_ID --yes
+  outlook-web-cli accounts
+  outlook-web-cli status      [--account work|all]
+  outlook-web-cli messages    [--account all] [--limit 20] [--unread] [--from addr] [--since 2026-11-01] [--folder inbox|sent|drafts|archive]
+  outlook-web-cli search      --query "invoice" [--account all] [--limit 20]
+  outlook-web-cli read        --account work --id MESSAGE_ID [--max-body-chars 20000]
+  outlook-web-cli agenda      [--account all] [--today | --tomorrow | --start-date D --end-date D]
+  outlook-web-cli attachments --account work --id MESSAGE_ID [--include-data] [--images-only] [--index N] [--offset N --length N]
+  outlook-web-cli attachment-inspect --account work --id MESSAGE_ID [--index N] [--prompt TEXT]   (needs OPENROUTER_API_KEY)
+  outlook-web-cli draft-new   --account work --to a@b.com --subject S --body TEXT --yes
+  outlook-web-cli draft-reply --account work --id MESSAGE_ID --body TEXT [--reply-all] [--add-to x@y.com] --yes
+  outlook-web-cli draft-delete --account work --id DRAFT_ID --yes
 
 Any command also takes --json '{"account":"work",...}'. Output is JSON. Draft commands do nothing without --yes.
 `;
@@ -137,7 +137,7 @@ async function main() {
     return out({ ok: true, accounts: listAccounts().map((a) => ({ account: a.name, username: a.username, aliases: a.aliases, cdp_port: a.cdpPort, saved_session: sessionStatus(a.name).saved })) });
   }
   const handler = commands[cmd];
-  if (!handler) throw new Error(`Unknown command '${cmd}'. Run outlook-web help.`);
+  if (!handler) throw new Error(`Unknown command '${cmd}'. Run outlook-web-cli help.`);
   const analyzer = openRouterVisionAnalyzer();
   if (analyzer) setVisionAnalyzer(analyzer);
   const { json, yes, ...rest } = flags;

@@ -12,7 +12,7 @@ import path from "node:path";
 //   { "accounts": [ { "name": "work", "aliases": ["contoso.com"], "username": "me@contoso.com",
 //                     "cdp_port": 9230, "mailbox_url": "https://outlook.cloud.microsoft/mail/" } ] }
 //
-// Saved sessions alone also count as accounts, so `outlook-web auth chrome --account work`
+// Saved sessions alone also count as accounts, so `outlook-web-cli auth chrome --account work`
 // is enough to start without writing a config file.
 
 export const DEFAULT_MAILBOX_URL = "https://outlook.cloud.microsoft/mail/";
