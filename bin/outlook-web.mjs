@@ -9,6 +9,7 @@ import {
   importCookies,
   importFromChrome,
   listAccounts,
+  refreshAccounts,
   refreshSession,
   resolveAccountAlias,
   sessionStatus,
@@ -117,19 +118,8 @@ async function auth(sub, flags) {
     return out({ ok: true, config_dir: configDir(), accounts: names.map((n) => ({ ...sessionStatus(n), cdp_port: getAccount(n)?.cdpPort || null })) });
   }
   if (sub === "refresh") {
-    const names = flags.all || !flags.account ? listAccounts().map((a) => a.name) : [accountName(flags)];
-    const results = [];
-    for (const n of names) {
-      let r = await refreshSession(n, { force: flags.rotate ? "cookies" : "" });
-      const acct = getAccount(n);
-      if (!r.ok && acct?.cdpPort) {
-        const imported = await importFromChrome(n, { cdpPort: acct.cdpPort, mainUrl: acct.mainUrl });
-        if (imported.ok) r = { ...(await refreshSession(n)), reimported_from_chrome: true };
-      }
-      const { token, ...safe } = r;
-      results.push({ ...safe, ...sessionStatus(n) });
-    }
-    return out({ ok: results.every((r) => r.ok), accounts: results });
+    const accounts = flags.all || !flags.account ? undefined : [accountName(flags)];
+    return out(await refreshAccounts({ accounts, rotate: Boolean(flags.rotate) }));
   }
   if (sub === "logout") {
     const name = accountName(flags);

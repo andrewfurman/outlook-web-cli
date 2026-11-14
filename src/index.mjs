@@ -5,6 +5,7 @@ export {
   getSessionToken,
   importCookies,
   importFromChrome,
+  refreshAccounts,
   refreshSession,
   sessionStatus,
   deleteSession,

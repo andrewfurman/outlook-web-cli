@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { getAccount, sessionsDir } from "./accounts.mjs";
+import { getAccount, listAccounts, sessionsDir } from "./accounts.mjs";
 import { connectCdp, findOutlookTab } from "./cdp.mjs";
 
 // Saved Outlook web sessions, used like a browser would: no Chrome needed after import.
@@ -375,4 +375,23 @@ function originOf(url) {
 
 function firstLine(s) {
   return String(s || "").split(/\r?\n/)[0].slice(0, 200);
+}
+
+// Renews every account (or the named ones): a fresh token, and with rotate also renewed
+// sign-in cookies. An account whose session is dead is re-imported from its Chrome port.
+// Safe to print: no tokens or cookies in the result. Run from cron as a keepalive.
+export async function refreshAccounts({ accounts, rotate = false } = {}) {
+  const names = accounts?.length ? accounts : listAccounts().map((a) => a.name);
+  const results = [];
+  for (const name of names) {
+    let r = await refreshSession(name, { force: rotate ? "cookies" : "" });
+    const account = getAccount(name);
+    if (!r.ok && account?.cdpPort) {
+      const imported = await importFromChrome(name, { cdpPort: account.cdpPort, mainUrl: account.mainUrl });
+      if (imported.ok) r = { ...(await refreshSession(name)), reimported_from_chrome: true };
+    }
+    const { token, ...safe } = r;
+    results.push({ ...safe, ...sessionStatus(name) });
+  }
+  return { ok: results.length > 0 && results.every((r) => r.ok), status: "ok", accounts: results };
 }

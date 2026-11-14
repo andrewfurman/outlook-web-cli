@@ -153,6 +153,13 @@ try {
   assert.equal(live.accounts[0].status, "signed_in");
   assert.equal(live.accounts[0].token_source, "saved");
 
+  // 8b. refreshAccounts renews every configured account and never returns secrets.
+  const all = await session.refreshAccounts({ rotate: true });
+  assert.equal(all.ok, true);
+  assert.equal(all.accounts[0].account, "contoso");
+  assert.equal(all.accounts[0].via, "cookies");
+  assert.ok(!/rt-|cookie-v|eyJ/.test(JSON.stringify(all)));
+
   // 9. A signed-out session reports needs_sign_in with the reason.
   authorizeMode = "login_required";
   saved = session.loadSession("contoso");
