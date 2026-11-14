@@ -1,0 +1,18 @@
+{
+  "name": "outlook-web-cli",
+  "version": "0.1.0",
+  "description": "Outlook mail and calendar from the command line through your Outlook web session (no app registration).",
+  "type": "module",
+  "license": "MIT",
+  "author": "Andrew Furman",
+  "repository": { "type": "git", "url": "https://github.com/andrewfurman/outlook-web-cli.git" },
+  "bin": { "outlook-web": "bin/outlook-web.mjs" },
+  "exports": { ".": "./src/index.mjs", "./session": "./src/session.mjs", "./vision": "./src/vision.mjs" },
+  "files": ["bin", "src", "README.md", "LICENSE"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "for f in bin/*.mjs src/*.mjs test/*.mjs; do node --check \"$f\" || exit 1; done",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "html-to-text": "^10.0.0" }
+}
