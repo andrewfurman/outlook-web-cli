@@ -35,6 +35,9 @@ Mail and calendar (read-only, plus drafts; nothing ever sends mail):
   outlook-web-cli search      --query "invoice" [--account all] [--limit 20]
   outlook-web-cli read        --account work --id MESSAGE_ID [--max-body-chars 20000]
   outlook-web-cli agenda      [--account all] [--today | --tomorrow | --start-date D --end-date D]
+  outlook-web-cli freebusy    --emails a@contoso.com,b@contoso.com [--account work] [--today | --tomorrow | --start-date D --end-date D]
+                           [--day-start 09:00 --day-end 17:00] [--min-minutes 30] [--weekends]
+                           when each person is busy, and the slots when everyone is free (Eastern time; no calendar sharing needed)
   outlook-web-cli attachments --account work --id MESSAGE_ID [--include-data] [--images-only] [--index N] [--offset N --length N]
   outlook-web-cli attachment-inspect --account work --id MESSAGE_ID [--index N] [--prompt TEXT]   (needs OPENROUTER_API_KEY)
   outlook-web-cli draft-new   --account work --to a@b.com --subject S --body TEXT --yes
