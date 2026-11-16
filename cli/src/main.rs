@@ -12,41 +12,58 @@ use outlook_web_cli::Ctx;
 use serde_json::{json, Map, Value};
 use std::io::Read;
 
-const OVERVIEW: &str = "SIGN IN (once per account; the session is saved to ~/.config/outlook-web-cli):
-  outlook-web-cli auth chrome  --account work --cdp-port 9230 [--mailbox-url URL]
-      import from a Chrome where Outlook web is open (started with --remote-debugging-port)
-  outlook-web-cli auth cookies --account work --file cookies.json [--username me@contoso.com]
-      import login.microsoftonline.com cookies exported from any browser (JSON or cookies.txt; - = stdin)
-  outlook-web-cli auth status  [--account work]
-  outlook-web-cli auth refresh [--account work | --all] [--rotate]   mint a fresh token; --rotate also renews the sign-in cookies
-  outlook-web-cli auth logout  --account work
+const TOP_HELP: &str = "{name} {version} - {about}
 
-MAIL AND CALENDAR (read-only, plus drafts; nothing ever sends mail):
-  outlook-web-cli accounts
-  outlook-web-cli status      [--account work|all]
-  outlook-web-cli messages    [--account all] [--limit 20] [--unread] [--from addr] [--since 2026-11-01] [--folder inbox|sent|drafts|archive]
-  outlook-web-cli search      --query \"invoice\" [--account all] [--limit 20]
-  outlook-web-cli read        --account work --id MESSAGE_ID [--max-body-chars 20000]
-  outlook-web-cli agenda      [--account all] [--today | --tomorrow | --start-date D --end-date D]
-  outlook-web-cli freebusy    --emails a@contoso.com,b@contoso.com [--account work] [--today | --tomorrow | --start-date D --end-date D]
-                              [--day-start 09:00 --day-end 17:00] [--min-minutes 30] [--weekends]
-      when each person is busy, and the slots when everyone is free (Eastern time; no calendar sharing needed)
-  outlook-web-cli attachments --account work --id MESSAGE_ID [--include-data] [--images-only] [--index N] [--offset N --length N]
-  outlook-web-cli attachment-inspect --account work --id MESSAGE_ID [--index N] [--prompt TEXT]   (needs OPENROUTER_API_KEY)
-  outlook-web-cli draft-new   --account work --to a@b.com --subject S --body TEXT --yes
-  outlook-web-cli draft-reply --account work --id MESSAGE_ID --body TEXT [--reply-all] [--add-to x@y.com] --yes
-  outlook-web-cli draft-delete --account work --id DRAFT_ID --yes
+Usage: {name} <COMMAND> [OPTIONS]
 
-Any command also takes --json '{\"account\":\"work\",...}' (snake_case fields, merged over the flags).
-Output is JSON, and the exit code is 1 when ok is false. Draft commands do nothing without --yes.";
+FIRST-TIME SETUP (once per account)
+  Open Outlook web in Chrome started with --remote-debugging-port=9230, then run
+  `{name} auth chrome --account work --cdp-port 9230`. The session is saved in
+  ~/.config/{name} (override with OUTLOOK_WEB_CONFIG_DIR).
+
+COMMANDS
+ Sign in
+  auth chrome         Import the session from a Chrome where Outlook web is open
+  auth cookies        Import login.microsoftonline.com cookies exported from a browser
+  auth status         Token and cookie lifetimes per account (no secrets)
+  auth refresh        Mint fresh tokens; --rotate also renews the sign-in cookies
+  auth logout         Remove an account's saved session
+  accounts            Configured accounts and whether a session is saved
+  status              Whether each account can get a token, and from where
+ Read (nothing is changed)
+  messages            Inbox (or another folder), newest first
+  search              Full-mailbox search
+  read                One message, with its body as text
+  agenda              Calendar for a day or range (America/New_York)
+  freebusy            When people are busy, and the slots when everyone is free
+  attachments         List attachments, or fetch their base64 data
+  attachment-inspect  Describe and transcribe an image attachment
+ Change (need --yes; mail is never sent)
+  draft-new           Save a new draft
+  draft-reply         Save a reply or reply-all draft
+  draft-delete        Move a draft to Deleted Items
+
+EXAMPLES
+  {name} accounts
+  {name} messages --account work --unread --limit 10
+  {name} search --account work --query \"invoice\"
+  {name} read --account work --id AAMkAGExample
+  {name} agenda --tomorrow
+  {name} freebusy --emails jane@contoso.com,sam@fabrikam.com --tomorrow
+  {name} draft-reply --account work --id AAMkAGExample --body \"Thanks!\" --yes
+  {name} auth refresh --all --rotate
+
+More: `{name} <COMMAND> --help` (or `{name} help <COMMAND>`) shows every flag with examples.
+Output: JSON on stdout; exit code 1 when \"ok\" is false. Any command also takes --json '{...}'.
+Safety: drafts only, nothing is ever sent; draft commands do nothing without --yes.";
 
 #[derive(Parser)]
 #[command(
     name = "outlook-web-cli",
     version,
     about = "Outlook mail and calendar from the command line, through your Outlook web session",
-    long_about = "Unofficial Outlook (Microsoft 365) mail and calendar CLI. Uses your Outlook web session instead of an Azure app registration: no admin consent and no client secret. It never sends mail.",
-    after_help = OVERVIEW
+    help_template = TOP_HELP,
+    override_usage = "outlook-web-cli <COMMAND> [OPTIONS]"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -55,7 +72,7 @@ struct Cli {
 
 #[derive(Args)]
 struct Common {
-    /// JSON body merged over the flags, e.g. '{"account":"work","limit":5}'
+    /// JSON object merged over the flags, snake_case fields, e.g. '{"account":"work","limit":5}'
     #[arg(long, value_name = "JSON")]
     json: Option<String>,
 }
@@ -63,214 +80,350 @@ struct Common {
 #[derive(Subcommand)]
 enum Command {
     /// Sign in, check, renew or remove saved sessions
+    #[command(after_help = "Examples:
+  outlook-web-cli auth chrome --account work --cdp-port 9230
+  outlook-web-cli auth status
+  outlook-web-cli auth refresh --all --rotate
+
+Run `outlook-web-cli auth <SUBCOMMAND> --help` for the flags of each.")]
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
     },
     /// Configured accounts and whether a session is saved
+    #[command(after_help = "Examples:
+  outlook-web-cli accounts
+
+Takes no flags except --json. Add accounts with `outlook-web-cli auth chrome --help`.")]
     Accounts,
     /// Whether each account can get a token, and from where
+    #[command(after_help = "Examples:
+  outlook-web-cli status
+  outlook-web-cli status --account work
+  outlook-web-cli status --account all")]
     Status {
-        /// Account name, alias, email domain or address, or "all"
-        #[arg(long)]
+        /// Account name, alias, email domain or address, or `all` (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Inbox (or another folder), newest first
+    #[command(after_help = "Examples:
+  outlook-web-cli messages --unread --limit 10
+  outlook-web-cli messages --account work --from jane@contoso.com --since 2026-11-01
+  outlook-web-cli messages --account work --folder sent --limit 5
+  outlook-web-cli messages --account work --search \"quarterly report\"
+
+Without --account, every account is read and merged newest first.")]
     Messages {
-        #[arg(long)]
+        /// Account name, alias, email domain or address, or `all` (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        /// 1-50 (default 20)
-        #[arg(long, visible_alias = "max-results")]
+        /// How many messages, 1-50 (default 20)
+        #[arg(long, visible_alias = "max-results", value_name = "N")]
         limit: Option<String>,
-        /// Only unread messages
+        /// Only unread messages; bare --unread means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         unread: Option<String>,
-        /// Sender address
-        #[arg(long, alias = "sender")]
+        /// Only messages from this sender address
+        #[arg(long, alias = "sender", value_name = "ADDRESS")]
         from: Option<String>,
-        /// YYYY-MM-DD
-        #[arg(long)]
+        /// Only messages received on or after this date, YYYY-MM-DD
+        #[arg(long, value_name = "DATE")]
         since: Option<String>,
-        /// Search words (relevance order)
-        #[arg(long)]
+        /// Search words within the folder (results in relevance order)
+        #[arg(long, value_name = "WORDS")]
         search: Option<String>,
-        /// inbox, sent, drafts, deleted, archive or junk
-        #[arg(long)]
+        /// Folder: inbox (default), sent, drafts, deleted, archive or junk
+        #[arg(long, value_name = "FOLDER")]
         folder: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Full-mailbox search
+    #[command(after_help = "Examples:
+  outlook-web-cli search --query \"invoice\"
+  outlook-web-cli search --account work --query \"budget review\" --limit 5
+
+--query is required. Searches every folder; use `messages --folder` to list one folder.")]
     Search {
-        #[arg(long)]
+        /// Words to search for (required)
+        #[arg(long, value_name = "WORDS")]
         query: Option<String>,
-        #[arg(long)]
+        /// Account name, alias, email domain or address, or `all` (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, visible_alias = "max-results")]
+        /// How many results, 1-50 (default 20)
+        #[arg(long, visible_alias = "max-results", value_name = "N")]
         limit: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// One message, with its body as text
+    #[command(after_help = "Examples:
+  outlook-web-cli read --account work --id AAMkAGExample
+  outlook-web-cli read --account work --id AAMkAGExample --max-body-chars 60000
+
+Get message ids from `messages` or `search` (the \"id\" field).")]
     Read {
-        #[arg(long)]
+        /// Account that holds the message; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, alias = "message-id")]
+        /// Message id from `messages` or `search` (required)
+        #[arg(long, alias = "message-id", value_name = "MESSAGE_ID")]
         id: Option<String>,
-        /// 2000-60000 (default 20000)
-        #[arg(long)]
+        /// Longest body to return, 2000-60000 characters (default 20000)
+        #[arg(long, value_name = "N")]
         max_body_chars: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Calendar for a day or range (America/New_York)
+    #[command(after_help = "Examples:
+  outlook-web-cli agenda
+  outlook-web-cli agenda --tomorrow --account work
+  outlook-web-cli agenda --start-date 2026-11-16 --end-date 2026-11-20
+
+With no day flags, shows today. Times are America/New_York.")]
     Agenda {
-        #[arg(long)]
+        /// Account name, alias, email domain or address, or `all` (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
+        /// Show today (the default); bare flag means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         today: Option<String>,
+        /// Show tomorrow instead; bare flag means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         tomorrow: Option<String>,
-        #[arg(long)]
+        /// First day of a range, YYYY-MM-DD or YYYY-MM-DDTHH:MM (use with --end-date)
+        #[arg(long, value_name = "DATE")]
         start_date: Option<String>,
-        #[arg(long)]
+        /// Last day of a range, YYYY-MM-DD or YYYY-MM-DDTHH:MM (use with --start-date)
+        #[arg(long, value_name = "DATE")]
         end_date: Option<String>,
-        #[arg(long, visible_alias = "max-results")]
+        /// Most events to return, 1-200 (default 50)
+        #[arg(long, visible_alias = "max-results", value_name = "N")]
         limit: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// When each person is busy, and the slots when everyone is free
+    #[command(after_help = "Examples:
+  outlook-web-cli freebusy --emails jane@contoso.com,sam@contoso.com --tomorrow
+  outlook-web-cli freebusy --emails jane@contoso.com --start-date 2026-11-17 --end-date 2026-11-19
+  outlook-web-cli freebusy --emails jane@contoso.com,sam@fabrikam.com --today --day-start 08:00 --day-end 18:00 --min-minutes 60
+  outlook-web-cli freebusy --emails jane@contoso.com --start-date 2026-11-17T11:00 --end-date 2026-11-17T15:00
+
+--emails is required. Works without calendar sharing; times are America/New_York.
+With no day flags, checks today. Without --account, the account matching the email domain is used.")]
     Freebusy {
-        /// Comma-separated addresses (up to 20)
-        #[arg(long, alias = "email", alias = "people", alias = "attendees")]
+        /// Comma-separated email addresses, up to 20 (required)
+        #[arg(
+            long,
+            alias = "email",
+            alias = "people",
+            alias = "attendees",
+            value_name = "ADDRESSES"
+        )]
         emails: Option<String>,
-        #[arg(long)]
+        /// Account to ask from (default: the one matching the email domain, else the only account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
+        /// Check today (the default); bare flag means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         today: Option<String>,
+        /// Check tomorrow; bare flag means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         tomorrow: Option<String>,
-        /// YYYY-MM-DD or YYYY-MM-DDTHH:MM
-        #[arg(long, alias = "start")]
+        /// Start of the range, YYYY-MM-DD or YYYY-MM-DDTHH:MM (use with --end-date)
+        #[arg(long, alias = "start", value_name = "DATE")]
         start_date: Option<String>,
-        /// YYYY-MM-DD or YYYY-MM-DDTHH:MM
-        #[arg(long, alias = "end")]
+        /// End of the range, YYYY-MM-DD or YYYY-MM-DDTHH:MM (use with --start-date)
+        #[arg(long, alias = "end", value_name = "DATE")]
         end_date: Option<String>,
-        /// Working day start (default 09:00)
-        #[arg(long)]
+        /// Working day start, HH:MM (default 09:00)
+        #[arg(long, value_name = "HH:MM")]
         day_start: Option<String>,
-        /// Working day end (default 17:00)
-        #[arg(long)]
+        /// Working day end, HH:MM (default 17:00)
+        #[arg(long, value_name = "HH:MM")]
         day_end: Option<String>,
-        /// Shortest slot to report, 5-480 (default 30)
-        #[arg(long)]
+        /// Shortest free slot to report, 5-480 minutes (default 30)
+        #[arg(long, value_name = "MINUTES")]
         min_minutes: Option<String>,
-        /// Include Saturdays and Sundays
+        /// Include Saturdays and Sundays; bare flag means true (optional value: true or false)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         weekends: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// List attachments, including inline screenshots; optionally their base64 data
+    #[command(after_help = "Examples:
+  outlook-web-cli attachments --account work --id AAMkAGExample
+  outlook-web-cli attachments --account work --id AAMkAGExample --images-only --include-data
+  outlook-web-cli attachments --account work --id AAMkAGExample --index 0 --include-data
+  outlook-web-cli attachments --account work --id AAMkAGExample --index 0 --offset 250000 --length 250000
+
+Without --include-data only names, types and sizes are listed. Pick one attachment with
+--index, --content-id or --attachment-id. --offset/--length pull a big file in pieces.")]
     Attachments {
-        #[arg(long)]
+        /// Account that holds the message; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, alias = "message-id")]
+        /// Message id from `messages` or `search` (required)
+        #[arg(long, alias = "message-id", value_name = "MESSAGE_ID")]
         id: Option<String>,
+        /// Also return base64 file data (files up to --max-data-bytes); optional value: true or false
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         include_data: Option<String>,
-        #[arg(long)]
+        /// Largest file to include data for, 1000-1000000 bytes (default 250000)
+        #[arg(long, value_name = "BYTES")]
         max_data_bytes: Option<String>,
+        /// Only list image attachments; optional value: true or false
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         images_only: Option<String>,
-        #[arg(long, alias = "attachment-index")]
+        /// Pick one attachment by its index in the listing (starts at 0)
+        #[arg(long, alias = "attachment-index", value_name = "N")]
         index: Option<String>,
-        #[arg(long, alias = "cid")]
+        /// Pick one attachment by its content id (inline images, the cid in the HTML)
+        #[arg(long, alias = "cid", value_name = "CID")]
         content_id: Option<String>,
-        #[arg(long)]
+        /// Pick one attachment by its attachment id from the listing
+        #[arg(long, value_name = "ATTACHMENT_ID")]
         attachment_id: Option<String>,
-        /// Byte offset of a range of one attachment
-        #[arg(long)]
+        /// Start byte of a range of the picked attachment (returns --length bytes)
+        #[arg(long, value_name = "BYTES")]
         offset: Option<String>,
-        /// Range length, 1000-1000000 (default 250000)
-        #[arg(long)]
+        /// Range length with --offset, 1000-1000000 bytes (default 250000)
+        #[arg(long, value_name = "BYTES")]
         length: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Describe and transcribe an image attachment (needs OPENROUTER_API_KEY)
-    #[command(name = "attachment-inspect")]
+    #[command(
+        name = "attachment-inspect",
+        after_help = "Examples:
+  outlook-web-cli attachment-inspect --account work --id AAMkAGExample
+  outlook-web-cli attachment-inspect --account work --id AAMkAGExample --index 1
+  outlook-web-cli attachment-inspect --account work --id AAMkAGExample --content-id shot1 --prompt \"List every error message\"
+
+Sends the image to a vision model through OpenRouter, so OPENROUTER_API_KEY must be set
+(OUTLOOK_WEB_VISION_MODEL picks the model). With no picker flag, the first image is used."
+    )]
     AttachmentInspect {
-        #[arg(long)]
+        /// Account that holds the message; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, alias = "message-id")]
+        /// Message id from `messages` or `search` (required)
+        #[arg(long, alias = "message-id", value_name = "MESSAGE_ID")]
         id: Option<String>,
-        #[arg(long, alias = "attachment-index")]
+        /// Pick the image by its index in `attachments` (default: the first image)
+        #[arg(long, alias = "attachment-index", value_name = "N")]
         index: Option<String>,
-        #[arg(long, alias = "cid")]
+        /// Pick the image by its content id (inline images)
+        #[arg(long, alias = "cid", value_name = "CID")]
         content_id: Option<String>,
-        #[arg(long)]
+        /// What to ask the model about the image (default: describe it and transcribe all text)
+        #[arg(long, value_name = "TEXT")]
         prompt: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Save a new draft (requires --yes)
-    #[command(name = "draft-new")]
+    #[command(
+        name = "draft-new",
+        after_help = "Examples:
+  outlook-web-cli draft-new --account work --to jane@contoso.com --subject \"Agenda\" --body \"Hi Jane, here is the agenda.\" --yes
+  outlook-web-cli draft-new --account work --to jane@contoso.com,sam@fabrikam.com --cc pat@contoso.com --subject \"Notes\" --body \"See below.\" --yes
+  outlook-web-cli draft-new --account work --to jane@contoso.com --subject \"Report\" --body-html \"<p>Hello <b>Jane</b></p>\" --yes
+
+The draft is saved in Drafts, never sent. Without --yes nothing is saved (the command only
+explains what it would do). --to is required; give --body or --body-html.
+Inline images need --json, e.g. --json '{\"inline_images\":[{\"url\":\"https://example.com/a.png\",\"content_id\":\"shot1\"}]}'."
+    )]
     DraftNew {
-        #[arg(long)]
+        /// Account to save the draft in; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long)]
+        /// Recipient address(es), comma-separated (required)
+        #[arg(long, value_name = "ADDRESSES")]
         to: Option<String>,
-        #[arg(long)]
+        /// Cc address(es), comma-separated
+        #[arg(long, value_name = "ADDRESSES")]
         cc: Option<String>,
-        #[arg(long)]
+        /// Subject line
+        #[arg(long, value_name = "TEXT")]
         subject: Option<String>,
-        /// Plain text body
-        #[arg(long, alias = "message", alias = "text")]
+        /// Plain-text body
+        #[arg(long, alias = "message", alias = "text", value_name = "TEXT")]
         body: Option<String>,
         /// HTML body (used instead of --body)
-        #[arg(long, alias = "html")]
+        #[arg(long, alias = "html", value_name = "HTML")]
         body_html: Option<String>,
-        /// Actually save the draft
+        /// Confirm: actually save the draft (without it nothing is saved)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         yes: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Save a reply or reply-all draft above the quoted original (requires --yes)
-    #[command(name = "draft-reply")]
+    #[command(
+        name = "draft-reply",
+        after_help = "Examples:
+  outlook-web-cli draft-reply --account work --id AAMkAGExample --body \"Thanks, done.\" --yes
+  outlook-web-cli draft-reply --account work --id AAMkAGExample --reply-all --body \"Agreed.\" --yes
+  outlook-web-cli draft-reply --account work --id AAMkAGExample --body \"Adding Sam.\" --add-to sam@fabrikam.com --add-cc pat@contoso.com --yes
+
+The reply is saved in Drafts, never sent. Without --yes nothing is saved (the command only
+explains what it would do). --id and --body (or --body-html) are required."
+    )]
     DraftReply {
-        #[arg(long)]
+        /// Account that holds the message; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, alias = "message-id")]
+        /// Id of the message to reply to, from `messages` or `search` (required)
+        #[arg(long, alias = "message-id", value_name = "MESSAGE_ID")]
         id: Option<String>,
-        #[arg(long, alias = "message", alias = "text")]
+        /// Plain-text reply, placed above the quoted original
+        #[arg(long, alias = "message", alias = "text", value_name = "TEXT")]
         body: Option<String>,
-        #[arg(long, alias = "html")]
+        /// HTML reply (used instead of --body)
+        #[arg(long, alias = "html", value_name = "HTML")]
         body_html: Option<String>,
+        /// Reply to everyone on the original message; optional value: true or false
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         reply_all: Option<String>,
-        /// Extra To recipients
-        #[arg(long)]
+        /// Extra To recipient(s), comma-separated
+        #[arg(long, value_name = "ADDRESSES")]
         add_to: Option<String>,
-        /// Extra Cc recipients
-        #[arg(long)]
+        /// Extra Cc recipient(s), comma-separated
+        #[arg(long, value_name = "ADDRESSES")]
         add_cc: Option<String>,
+        /// Confirm: actually save the draft (without it nothing is saved)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         yes: Option<String>,
         #[command(flatten)]
         common: Common,
     },
     /// Move a draft to Deleted Items; anything that isn't a draft is refused (requires --yes)
-    #[command(name = "draft-delete")]
+    #[command(
+        name = "draft-delete",
+        after_help = "Examples:
+  outlook-web-cli draft-delete --account work --id AAMkAGDraftExample --yes
+  outlook-web-cli messages --account work --folder drafts
+
+Find draft ids with `messages --folder drafts`. The draft moves to Deleted Items; received
+or sent messages are refused. Without --yes nothing is deleted."
+    )]
     DraftDelete {
-        #[arg(long)]
+        /// Account that holds the draft; see `accounts` for names
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
-        #[arg(long, alias = "message-id")]
+        /// Draft id from `messages --folder drafts` (required)
+        #[arg(long, alias = "message-id", value_name = "DRAFT_ID")]
         id: Option<String>,
+        /// Confirm: actually delete the draft (without it nothing is deleted)
         #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
         yes: Option<String>,
         #[command(flatten)]
@@ -281,45 +434,84 @@ enum Command {
 #[derive(Subcommand)]
 enum AuthCommand {
     /// Import the session from a Chrome where Outlook web is open
+    #[command(after_help = "Examples:
+  outlook-web-cli auth chrome --account work --cdp-port 9230
+  outlook-web-cli auth chrome --account fabrikam --cdp-port 9231 --mailbox-url https://outlook.cloud.microsoft/mail/jane@fabrikam.com/
+  outlook-web-cli auth chrome --account work
+
+Start Chrome first: google-chrome --remote-debugging-port=9230 --user-data-dir=$HOME/.chrome-outlook
+and sign in to Outlook web there (tick \"Stay signed in\"). The port is remembered per account,
+so later runs can omit --cdp-port. --account and a port are required the first time.")]
     Chrome {
-        #[arg(long)]
+        /// Name to save the account under: letters, digits, - or _ (required)
+        #[arg(long, value_name = "NAME")]
         account: Option<String>,
-        /// The Chrome --remote-debugging-port (remembered in config.json)
-        #[arg(long)]
+        /// The Chrome --remote-debugging-port where Outlook web is open (required the first time; remembered)
+        #[arg(long, value_name = "PORT")]
         cdp_port: Option<String>,
-        /// Pick the tab for this mailbox URL (for a second mailbox in one Chrome)
-        #[arg(long)]
+        /// Pick the tab for this mailbox URL (for a second mailbox in the same Chrome)
+        #[arg(long, value_name = "URL")]
         mailbox_url: Option<String>,
     },
     /// Import login.microsoftonline.com cookies (Cookie-Editor JSON or cookies.txt)
+    #[command(after_help = "Examples:
+  outlook-web-cli auth cookies --account work --file ~/Downloads/cookies.json --username jane@contoso.com
+  outlook-web-cli auth cookies --account work --file ~/Downloads/cookies.txt
+  cat cookies.json | outlook-web-cli auth cookies --account work --file -
+
+Export the cookies for login.microsoftonline.com from your browser first, then delete the
+export file: it is a credential. Only that domain's cookies are kept.")]
     Cookies {
-        #[arg(long)]
+        /// Name to save the account under: letters, digits, - or _ (required)
+        #[arg(long, value_name = "NAME")]
         account: Option<String>,
-        /// Export file, or - for stdin
-        #[arg(long)]
+        /// Cookie export, Cookie-Editor JSON or Netscape cookies.txt; `-` reads stdin (required)
+        #[arg(long, value_name = "PATH")]
         file: Option<String>,
-        #[arg(long)]
+        /// Sign-in address, remembered for the account (e.g. jane@contoso.com)
+        #[arg(long, value_name = "EMAIL")]
         username: Option<String>,
-        #[arg(long)]
+        /// Azure tenant id if known (default: organizations)
+        #[arg(long, value_name = "TENANT_ID")]
         tenant: Option<String>,
     },
     /// Token minutes left, refresh-token hours left and cookie expiry (no secrets)
+    #[command(after_help = "Examples:
+  outlook-web-cli auth status
+  outlook-web-cli auth status --account work")]
     Status {
-        #[arg(long)]
+        /// Only this account (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
     },
     /// Mint fresh tokens now; --rotate also renews the sign-in cookies (cron keepalive)
+    #[command(after_help = "Examples:
+  outlook-web-cli auth refresh --account work
+  outlook-web-cli auth refresh --all
+  outlook-web-cli auth refresh --all --rotate
+
+Run `auth refresh --all --rotate` from cron every few hours to keep every account signed in.
+With neither --account nor --all, every account is refreshed.")]
     Refresh {
-        #[arg(long)]
+        /// Only this account (default: every account)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
+        /// Refresh every account (the default when --account is not given)
         #[arg(long)]
         all: bool,
+        /// Also renew the sign-in cookies with a silent sign-in (keeps the session alive for months)
         #[arg(long)]
         rotate: bool,
     },
     /// Remove an account's saved session
+    #[command(after_help = "Examples:
+  outlook-web-cli auth logout --account work
+
+Deletes the saved session file for that account (you must sign in again). It does not
+sign you out of Outlook web in the browser.")]
     Logout {
-        #[arg(long)]
+        /// Account whose saved session to delete (required)
+        #[arg(long, value_name = "ACCOUNT")]
         account: Option<String>,
     },
 }
@@ -569,15 +761,110 @@ fn run(ctx: &Ctx, matches: &ArgMatches, cli: Cli) -> Result<Value> {
     }
 }
 
+/// The subcommand path as typed, e.g. "auth chrome" or "read".
+fn command_path(m: &ArgMatches) -> String {
+    let mut parts = Vec::new();
+    let mut cur = m;
+    while let Some((name, sub)) = cur.subcommand() {
+        parts.push(name);
+        cur = sub;
+    }
+    parts.join(" ")
+}
+
+/// A failed result about a missing or invalid argument also says where the examples are.
+fn with_hint(mut result: Value, path: &str) -> Value {
+    let status = result["status"].as_str().unwrap_or("");
+    let message = result["message"].as_str().unwrap_or("");
+    let usage_problem = status.starts_with("missing_")
+        || status == "invalid_folder"
+        || message.contains("is required");
+    if result.get("ok") == Some(&json!(false)) && usage_problem && !path.is_empty() {
+        if let Some(o) = result.as_object_mut() {
+            o.insert(
+                "hint".into(),
+                json!(format!(
+                    "Run `outlook-web-cli {path} --help` for the flags and examples."
+                )),
+            );
+        }
+    }
+    result
+}
+
 fn main() {
     let matches = Cli::command().get_matches();
+    let path = command_path(&matches);
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
     let ctx = Ctx::from_env();
     match run(&ctx, &matches, cli) {
-        Ok(v) => out(&v),
-        Err(e) => out(&json!({ "ok": false, "status": "error", "message": format!("{e:#}") })),
+        Ok(v) => out(&with_hint(v, &path)),
+        Err(e) => out(&with_hint(
+            json!({ "ok": false, "status": "error", "message": format!("{e:#}") }),
+            &path,
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every command and subcommand has a description and an Examples section, and every
+    /// flag has help text (so a new flag can't be added undocumented).
+    #[test]
+    fn every_command_and_flag_is_documented() {
+        fn walk(cmd: &clap::Command, path: &str, count: &mut usize) {
+            for sub in cmd.get_subcommands() {
+                if sub.get_name() == "help" {
+                    continue;
+                }
+                let p = format!("{path} {}", sub.get_name());
+                assert!(sub.get_about().is_some(), "{p}: no description");
+                let after = sub.get_after_help().map(|h| h.to_string());
+                assert!(
+                    after.is_some_and(|h| h.contains("Examples:")),
+                    "{p}: no Examples: section in after_help"
+                );
+                for arg in sub.get_arguments() {
+                    assert!(
+                        arg.get_help()
+                            .is_some_and(|h| !h.to_string().trim().is_empty()),
+                        "{p}: --{} has no help text",
+                        arg.get_id()
+                    );
+                    if arg.get_action().takes_values() {
+                        assert!(
+                            arg.get_value_names().is_some(),
+                            "{p}: --{} has no value name",
+                            arg.get_id()
+                        );
+                    }
+                }
+                *count += 1;
+                walk(sub, &p, count);
+            }
+        }
+        let mut count = 0;
+        walk(&Cli::command(), "outlook-web-cli", &mut count);
+        assert_eq!(count, 18, "command count changed: update the help too");
+    }
+
+    #[test]
+    fn top_level_help_lists_every_command_once() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("EXAMPLES"));
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name();
+            if name != "help" {
+                assert!(
+                    help.contains(&format!("  {name} ")),
+                    "{name} not in top help"
+                );
+            }
+        }
     }
 }

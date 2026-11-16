@@ -129,6 +129,31 @@ They are credentials: anyone with the file can read that mailbox until the sessi
 | `attachment-inspect --id ID` | Describe and transcribe an image attachment with a vision model (`OPENROUTER_API_KEY`) |
 | `draft-new`, `draft-reply`, `draft-delete` | Save, reply to (`--reply-all`, `--add-to`, `--add-cc`) or discard drafts. Requires `--yes` |
 
+### Getting help
+
+`outlook-web-cli` (or `--help`, `-h`, `help`) prints one screen: first-time setup, every command grouped by purpose, copy-pasteable examples and the safety rules. Each command has its own page with every flag, accepted values, defaults and examples:
+
+```bash
+outlook-web-cli --help               # overview and examples
+outlook-web-cli freebusy --help      # one command: every flag, plus examples (same as: outlook-web-cli help freebusy)
+outlook-web-cli auth chrome --help   # subcommands too
+```
+
+Common tasks:
+
+```bash
+outlook-web-cli accounts
+outlook-web-cli messages --account work --unread --limit 10
+outlook-web-cli search --account work --query "invoice"
+outlook-web-cli read --account work --id AAMkAGExample
+outlook-web-cli agenda --tomorrow
+outlook-web-cli freebusy --emails jane@contoso.com,sam@fabrikam.com --tomorrow
+outlook-web-cli draft-reply --account work --id AAMkAGExample --body "Thanks!" --yes
+outlook-web-cli auth refresh --all --rotate
+```
+
+A missing or invalid argument returns `"ok": false` with a `hint` that names the command's `--help`. Draft commands never send mail and do nothing without `--yes`.
+
 Omit `--account` on read commands to cover every account. Every command takes `--json '{...}'` with the same fields in snake_case, merged over the flags (for example `--json '{"inline_images":[{"url":"https://...","content_id":"shot1"}]}'` on `draft-new`). Output is JSON, and the exit code is 1 when `ok` is false. `outlook-web-cli help COMMAND` shows each command's flags.
 
 Environment settings:
