@@ -1,4 +1,6 @@
-node_modules/
+/target/
+/cli/target/
+.DS_Store
 *.tmp
 .env
 cookies*.json

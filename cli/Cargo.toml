@@ -1,0 +1,35 @@
+[package]
+name = "outlook-web-cli"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+description = "Outlook mail and calendar from the command line through your Outlook web session (no app registration)"
+repository = "https://github.com/andrewfurman/outlook-web-cli"
+readme = "../README.md"
+
+[[bin]]
+name = "outlook-web-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+url = "2"
+percent-encoding = "2"
+base64 = "0.22"
+sha2 = "0.10"
+getrandom = "0.4"
+regex = "1"
+dirs = "6"
+tungstenite = "0.30"
+html2text = "0.17"
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+tiny_http = "0.12"

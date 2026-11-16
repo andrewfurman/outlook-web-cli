@@ -1,6 +1,6 @@
 # outlook-web-cli
 
-Unofficial command-line access to Outlook (Microsoft 365) mail and calendar, using your **Outlook web session** instead of an Azure app registration. If you can open Outlook in a browser, you can use it from the terminal, from scripts, and from AI agents. No admin consent and no client secret.
+An unofficial **Rust CLI** for Outlook (Microsoft 365) mail and calendar, using your **Outlook web session** instead of an Azure app registration. If you can open Outlook in a browser, you can use it from the terminal, from scripts, and from AI agents. No admin consent and no client secret.
 
 It reads mail, searches, reads the calendar and attachments, checks when coworkers are free or busy, and saves drafts. **It never sends mail**: there is no send code path, and draft commands do nothing without `--yes`.
 
@@ -15,14 +15,26 @@ outlook-web-cli draft-reply --account work --id AAMkAG... --reply-all --body "Th
 
 ## Install
 
-Needs Node.js 22 or newer.
+Install a current stable Rust toolchain from [rustup.rs](https://rustup.rs/) (1.88 or newer), then:
 
 ```bash
-npm install -g https://github.com/andrewfurman/outlook-web-cli/archive/refs/tags/v0.2.0.tar.gz
-outlook-web-cli help
+cargo install --locked --git https://github.com/andrewfurman/outlook-web-cli
+outlook-web-cli --help
 ```
 
-Or from a checkout: `npm install && npm link`.
+Cargo places `outlook-web-cli` in `~/.cargo/bin`; add that directory to your PATH if needed. From a checkout:
+
+```bash
+cargo install --locked --path cli
+```
+
+To build a release binary without installing it (Linux x86_64 shown; the binary lands in `cli/target/x86_64-unknown-linux-gnu/release/outlook-web-cli`):
+
+```bash
+cargo build --locked --release --manifest-path cli/Cargo.toml --target x86_64-unknown-linux-gnu
+```
+
+It runs on Linux and macOS. Sessions saved by the earlier Node.js version (v0.3.0) keep working unchanged: the config directory, `config.json` and the session file format are the same.
 
 ## Multiple accounts
 
@@ -88,7 +100,7 @@ outlook-web-cli auth logout --account work
 `~/.config/outlook-web-cli/` (or `$OUTLOOK_WEB_CONFIG_DIR`):
 
 - `config.json` holds the account list: name, aliases, username, and Chrome port.
-- `sessions/<account>.json` holds the tokens and cookies, written atomically with mode `0600`.
+- `sessions/<account>.json` holds the tokens and cookies, written atomically with mode `0600`. Fields this version doesn't know about are kept when the file is rewritten.
 
 They are credentials: anyone with the file can read that mailbox until the session ends. Keep them out of git and backups you share. Signing out of Outlook web everywhere, or changing your password, ends the session.
 
@@ -117,29 +129,37 @@ They are credentials: anyone with the file can read that mailbox until the sessi
 | `attachment-inspect --id ID` | Describe and transcribe an image attachment with a vision model (`OPENROUTER_API_KEY`) |
 | `draft-new`, `draft-reply`, `draft-delete` | Save, reply to (`--reply-all`, `--add-to`, `--add-cc`) or discard drafts. Requires `--yes` |
 
-Omit `--account` on read commands to cover every account. Every command takes `--json '{...}'` with the same fields in snake_case. Output is JSON, and the exit code is 1 when `ok` is false.
+Omit `--account` on read commands to cover every account. Every command takes `--json '{...}'` with the same fields in snake_case, merged over the flags (for example `--json '{"inline_images":[{"url":"https://...","content_id":"shot1"}]}'` on `draft-new`). Output is JSON, and the exit code is 1 when `ok` is false. `outlook-web-cli help COMMAND` shows each command's flags.
 
-## Use as a library
+Environment settings:
 
-The CLI is all you need. The same functions are also exported for programs that want to call them directly instead of running a process per command:
-
-```js
-import { configureAccounts, commands, outlookMessages, setVisionAnalyzer } from "outlook-web-cli";
-
-configureAccounts([{ name: "work", aliases: ["contoso.com"], cdp_port: 9230 }]);
-const inbox = await outlookMessages({ account: "work", unread: true, limit: 5 });
-const draft = await commands["draft-new"]({ account: "work", to: "a@b.com", subject: "Hi", body: "..." }, { confirmed: true });
-```
-
-[PhoneClaw](https://github.com/andrewfurman/phone-claw) uses it this way for voice access to work mail.
+| Variable | What it does |
+| --- | --- |
+| `OUTLOOK_WEB_CONFIG_DIR` | Where `config.json` and `sessions/` live (default `~/.config/outlook-web-cli`) |
+| `OPENROUTER_API_KEY`, `OUTLOOK_WEB_VISION_MODEL` | Image model for `attachment-inspect` (default model `google/gemini-2.5-flash`) |
+| `OUTLOOK_INLINE_IMAGE_HOSTS` | Comma-separated hosts that draft inline images may be fetched from (none by default) |
 
 ## Tests
 
 ```bash
-npm test
+cargo test --manifest-path cli/Cargo.toml
+cargo clippy --manifest-path cli/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path cli/Cargo.toml --check
 ```
 
-The tests use fake Outlook and Microsoft sign-in servers and need no account. `OUTLOOK_TEST_TOKEN` / `OUTLOOK_TEST_TOKEN_<ACCOUNT>`, `OUTLOOK_REST_BASE_URL`, `OUTLOOK_GRAPH_BASE_URL` and `OUTLOOK_WEB_LOGIN_BASE_URL` point the code at test servers.
+The tests use fake Outlook, Microsoft Graph, Microsoft sign-in and Chrome DevTools servers and need no account. `OUTLOOK_TEST_TOKEN` / `OUTLOOK_TEST_TOKEN_<ACCOUNT>`, `OUTLOOK_REST_BASE_URL`, `OUTLOOK_GRAPH_BASE_URL`, `OUTLOOK_WEB_LOGIN_BASE_URL`, `OPENROUTER_BASE_URL` and `OUTLOOK_TEST_NOW_MS` point the code at test servers and a fixed clock. CI runs all three commands on Linux and macOS.
+
+## Contributing
+
+All changes to this repository are made through pull requests, for tracking: create a branch, make a focused change, and open a PR describing the resulting behavior and how it was validated. Nothing is pushed directly to `main`. CI must pass before a PR is merged. Use only placeholder data (contoso.com, fabrikam.com) in tests and examples, never real mailboxes, tokens or cookies.
+
+## History
+
+Rewritten in Rust in v1.0.0 to match the owner's other command-line tools, such as [google-photos-web-cli](https://github.com/andrewfurman/google-photos-web-cli). The commands, flags, JSON output and saved-session format are the same. The Node.js version, including its importable JavaScript library (`configureAccounts`, `commands`, `setVisionAnalyzer`, ...), remains available at tag [`v0.3.0`](https://github.com/andrewfurman/outlook-web-cli/tree/v0.3.0):
+
+```bash
+npm install https://github.com/andrewfurman/outlook-web-cli/archive/refs/tags/v0.3.0.tar.gz
+```
 
 ## Caveats
 
