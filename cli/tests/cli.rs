@@ -36,7 +36,7 @@ fn help_lists_every_command() {
             "draft-reply",
             "attachment-inspect",
             "--json",
-            "nothing ever sends mail",
+            "nothing is ever sent",
         ] {
             assert!(text.contains(phrase), "{phrase} missing from {args:?}");
         }
@@ -45,7 +45,7 @@ fn help_lists_every_command() {
         cli(&dir).args([sub, "--help"]).assert().success();
     }
     let v = cli(&dir).arg("--version").output().unwrap();
-    assert!(String::from_utf8_lossy(&v.stdout).contains("1.0.0"));
+    assert!(String::from_utf8_lossy(&v.stdout).contains(env!("CARGO_PKG_VERSION")));
 }
 
 #[test]
