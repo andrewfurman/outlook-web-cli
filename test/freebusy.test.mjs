@@ -54,6 +54,7 @@ try {
   assert.deepEqual(posts[0].payload.Schedules, ["alice@contoso.com", "bob@contoso.com"], "deduplicated, lower-cased");
   assert.equal(posts[0].payload.StartTime.DateTime, "2026-11-17T00:00:00");
   assert.equal(posts[0].payload.StartTime.TimeZone, "Eastern Standard Time");
+  assert.equal(posts[0].headers.prefer, 'outlook.timezone="America/New_York"', "answers in Eastern, not UTC");
   const alice = r.people.find((p) => p.email === "alice@contoso.com");
   assert.deepEqual(alice.busy.map((b) => [b.start.slice(11), b.end.slice(11), b.status]), [["10:00", "11:00", "busy"], ["19:00", "20:00", "busy"]], "overlaps merged, Free items dropped");
   const bob = r.people.find((p) => p.email === "bob@contoso.com");

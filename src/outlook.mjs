@@ -733,7 +733,8 @@ function freeBusyAccount(account, people) {
 async function postJson(url, token, payload) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" },
+    // Without the Prefer header, getSchedule answers in UTC whatever time zone the request used.
+    headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", prefer: `outlook.timezone="${ET_TIMEZONE}"` },
     body: JSON.stringify(payload),
     redirect: "error",
     signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
