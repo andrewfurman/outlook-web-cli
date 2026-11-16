@@ -2,13 +2,14 @@
 
 Unofficial command-line access to Outlook (Microsoft 365) mail and calendar, using your **Outlook web session** instead of an Azure app registration. If you can open Outlook in a browser, you can use it from the terminal, from scripts, and from AI agents. No admin consent and no client secret.
 
-It reads mail, searches, reads the calendar and attachments, and saves drafts. **It never sends mail**: there is no send code path, and draft commands do nothing without `--yes`.
+It reads mail, searches, reads the calendar and attachments, checks when coworkers are free or busy, and saves drafts. **It never sends mail**: there is no send code path, and draft commands do nothing without `--yes`.
 
 ```bash
 outlook-web-cli auth chrome --account work --cdp-port 9230
 outlook-web-cli messages --account work --unread --limit 10
 outlook-web-cli read --account work --id AAMkAG...
 outlook-web-cli agenda --today
+outlook-web-cli freebusy --emails alice@contoso.com,bob@contoso.com --tomorrow
 outlook-web-cli draft-reply --account work --id AAMkAG... --reply-all --body "Thanks, done." --yes
 ```
 
@@ -22,6 +23,22 @@ outlook-web-cli help
 ```
 
 Or from a checkout: `npm install && npm link`.
+
+## Multiple accounts
+
+Each mailbox is a named account with its own saved session, so work mailboxes in different organizations live side by side:
+
+```bash
+outlook-web-cli auth chrome --account contoso  --cdp-port 9230
+outlook-web-cli auth chrome --account fabrikam --cdp-port 9231 --mailbox-url https://outlook.cloud.microsoft/mail/me@fabrikam.com/
+outlook-web-cli accounts                                   # both, with their aliases and session state
+outlook-web-cli messages --unread                          # every account, newest first across both
+outlook-web-cli agenda --tomorrow --account fabrikam       # one account; aliases, email domains and addresses also work
+outlook-web-cli freebusy --emails pat@fabrikam.com         # picks fabrikam from the email domain
+outlook-web-cli auth refresh --all --rotate                # keep every account signed in (cron)
+```
+
+Read commands (`status`, `messages`, `search`, `agenda`) cover every account when `--account` is left out or set to `all`. Commands that act on one message or draft need `--account`.
 
 ## Signing in: how the web session works
 
@@ -95,6 +112,7 @@ They are credentials: anyone with the file can read that mailbox until the sessi
 | `search --query Q` | Full-mailbox search |
 | `read --id ID` | One message, with its body as text |
 | `agenda` | Calendar for `--today`, `--tomorrow`, or `--start-date`/`--end-date` (America/New_York) |
+| `freebusy --emails a@x.com,b@x.com` | When each person is busy and the slots when everyone is free, like Outlook's Scheduling Assistant. Works for coworkers who haven't shared their calendar (you see busy/tentative/out-of-office, plus subjects only if they share more). Same range flags as `agenda` (`--start-date`/`--end-date` also take times, e.g. `2026-11-17T11:00`); `--day-start 09:00 --day-end 17:00`, `--min-minutes 30`, `--weekends`. Up to 20 people; times are America/New_York. The account defaults to the one matching their email domain |
 | `attachments --id ID` | List attachments, including inline screenshots; `--include-data` returns base64 (`--offset`/`--length` for big files) |
 | `attachment-inspect --id ID` | Describe and transcribe an image attachment with a vision model (`OPENROUTER_API_KEY`) |
 | `draft-new`, `draft-reply`, `draft-delete` | Save, reply to (`--reply-all`, `--add-to`, `--add-cc`) or discard drafts. Requires `--yes` |
@@ -102,6 +120,8 @@ They are credentials: anyone with the file can read that mailbox until the sessi
 Omit `--account` on read commands to cover every account. Every command takes `--json '{...}'` with the same fields in snake_case. Output is JSON, and the exit code is 1 when `ok` is false.
 
 ## Use as a library
+
+The CLI is all you need. The same functions are also exported for programs that want to call them directly instead of running a process per command:
 
 ```js
 import { configureAccounts, commands, outlookMessages, setVisionAnalyzer } from "outlook-web-cli";

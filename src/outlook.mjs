@@ -626,6 +626,176 @@ export async function outlookAgenda({
   return result;
 }
 
+// Free/busy for one or more people, like Outlook's Scheduling Assistant. Uses the
+// signed-in account's getSchedule, so it works for anyone in the same organization
+// (and other organizations that publish free/busy) without them sharing their calendar.
+// Returns each person's busy blocks (subject and location only when they share more
+// than free/busy) and the slots inside the working day when everyone is free.
+// Read-only. All times are US Eastern wall-clock times.
+const FREEBUSY_MAX_PEOPLE = 20;
+
+export async function outlookFreeBusy({
+  account,
+  emails,
+  // Same range options as outlookAgenda; start_date/end_date may also be date-times (2026-11-17T11:00).
+  today = false,
+  tomorrow = false,
+  start_date,
+  end_date,
+  day_start = "09:00",
+  day_end = "17:00",
+  min_minutes = 30,
+  weekends = false,
+} = {}) {
+  const people = [...new Set(parseRecipients(emails).map((r) => r.EmailAddress.Address.toLowerCase()))];
+  if (!people.length) {
+    return { ok: false, status: "missing_emails", answer_text: "Give one or more email addresses, separated by commas." };
+  }
+  if (people.length > FREEBUSY_MAX_PEOPLE) {
+    return { ok: false, status: "too_many_emails", answer_text: `Check at most ${FREEBUSY_MAX_PEOPLE} people at a time.` };
+  }
+  const target = freeBusyAccount(account, people);
+  if (!target) {
+    return {
+      ok: false,
+      status: "account_required",
+      answer_text: `Say which account to check from: ${accountNames().join(", ") || "none set up"}.`,
+    };
+  }
+  const withSeconds = (v) => (/T\d{2}:\d{2}$/.test(v) ? `${v}:00` : v);
+  const range = normalizeEtLocalRange({ today, tomorrow, start_date, end_date });
+  const startLocal = withSeconds(range.startLocal), endLocal = withSeconds(range.endLocal);
+  const auth = await safeGetBestToken(target, "calendar");
+  if (!auth?.token) return { ok: false, status: "needs_sign_in", account: target.label, answer_text: `The ${target.label} Outlook session needs signing in again.` };
+
+  const windowsTz = "Eastern Standard Time";
+  const res = await postJson(new URL("/api/v2.0/me/calendar/getschedule", ensureTrailingSlash(OUTLOOK_REST_BASE)), auth.token, {
+    Schedules: people,
+    StartTime: { DateTime: startLocal, TimeZone: windowsTz },
+    EndTime: { DateTime: endLocal, TimeZone: windowsTz },
+    AvailabilityViewInterval: 15,
+  });
+  if (!res.ok) {
+    return { ok: false, status: "freebusy_failed", account: target.label, upstream_http_status: res.status, upstream_error: res.error, answer_text: "Outlook didn't return free/busy times." };
+  }
+
+  const schedules = Array.isArray(res.body?.value) ? res.body.value : [];
+  const results = people.map((email) => {
+    const sched = schedules.find((x) => String(x.ScheduleId || "").toLowerCase() === email) || {};
+    if (sched.Error) return { email, ok: false, error: normalizeString(sched.Error.Message) || "unavailable", busy: [] };
+    const busy = (sched.ScheduleItems || [])
+      .filter((i) => i.Status && i.Status !== "Free")
+      .map((i) => ({
+        start: wallTime(i.Start?.DateTime),
+        end: wallTime(i.End?.DateTime),
+        status: String(i.Status).toLowerCase(),
+        ...(i.Subject ? { subject: i.Subject } : {}),
+        ...(i.Location ? { location: i.Location } : {}),
+      }))
+      .sort((a, b) => a.start.localeCompare(b.start));
+    return { email, ok: true, busy: mergeBusy(busy) };
+  });
+
+  const known = results.filter((r) => r.ok);
+  const freeForAll = known.length
+    ? commonFreeSlots(known.flatMap((r) => r.busy), { startLocal, endLocal, dayStart: day_start, dayEnd: day_end, minMinutes: clampInteger(min_minutes, 5, 480, 30), weekends: toBoolean(weekends) })
+    : [];
+  const unavailable = results.filter((r) => !r.ok).map((r) => r.email);
+  return {
+    ok: known.length > 0,
+    status: known.length ? "ok" : "freebusy_unavailable",
+    account: target.label,
+    timezone: ET_TIMEZONE,
+    start: startLocal,
+    end: endLocal,
+    working_day: `${day_start}-${day_end}`,
+    people: results,
+    free_for_all: freeForAll,
+    answer_text: [
+      known.length ? `${freeForAll.length} slot${freeForAll.length === 1 ? "" : "s"} when ${known.length === 1 ? "they are" : "everyone is"} free (Eastern, ${day_start}-${day_end}).` : "No free/busy information came back.",
+      unavailable.length ? `No free/busy for ${unavailable.join(", ")}.` : "",
+    ].filter(Boolean).join(" "),
+  };
+}
+
+// The account to query from: the one named, else the one whose domain matches the
+// people being checked, else the only account.
+function freeBusyAccount(account, people) {
+  if (normalizeString(account) && normalizeString(account).toLowerCase() !== "all") return singleWorkAccount(account);
+  const all = listAccounts();
+  for (const email of people) {
+    const key = resolveAccountAlias(email.replace(/^.*@/, ""));
+    if (key) return getAccount(key);
+  }
+  return all.length === 1 ? all[0] : null;
+}
+
+async function postJson(url, token, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    // Without the Prefer header, getSchedule answers in UTC whatever time zone the request used.
+    headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", prefer: `outlook.timezone="${ET_TIMEZONE}"` },
+    body: JSON.stringify(payload),
+    redirect: "error",
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+  });
+  const text = await response.text().catch(() => "");
+  let body;
+  try { body = JSON.parse(text); } catch { body = null; }
+  return { ok: response.ok, status: response.status, body, error: !response.ok ? (body?.error?.message || text.slice(0, 200)) : "" };
+}
+
+// "2026-11-17T11:00:00.0000000" -> "2026-11-17T11:00"
+function wallTime(value) {
+  return String(value || "").slice(0, 16);
+}
+
+// Wall-clock "YYYY-MM-DDTHH:mm" <-> minutes, with no time zone math (everything is Eastern).
+function wallMinutes(value) {
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 60000 : NaN;
+}
+
+function minutesToWall(minutes) {
+  return new Date(minutes * 60000).toISOString().slice(0, 16);
+}
+
+// Joins overlapping or touching busy blocks for one person.
+function mergeBusy(blocks) {
+  const out = [];
+  for (const b of blocks) {
+    const last = out[out.length - 1];
+    if (last && b.start <= last.end) {
+      if (b.end > last.end) last.end = b.end;
+      if (last.status !== b.status) last.status = [last.status, b.status].includes("busy") ? "busy" : last.status;
+      if (b.subject && !last.subject) last.subject = b.subject;
+    } else out.push({ ...b });
+  }
+  return out;
+}
+
+function commonFreeSlots(busy, { startLocal, endLocal, dayStart, dayEnd, minMinutes, weekends }) {
+  const hm = (v) => { const [h, m] = String(v).split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+  const ds = hm(dayStart), de = hm(dayEnd);
+  const rangeStart = wallMinutes(startLocal), rangeEnd = wallMinutes(endLocal);
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || de <= ds) return [];
+  const blocks = busy.map((b) => [wallMinutes(b.start), wallMinutes(b.end)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const slots = [];
+  for (let day = Math.floor(rangeStart / 1440) * 1440; day < rangeEnd; day += 1440) {
+    const weekday = new Date(day * 60000).getUTCDay();
+    if (!weekends && (weekday === 0 || weekday === 6)) continue;
+    let cursor = Math.max(day + ds, rangeStart);
+    const stop = Math.min(day + de, rangeEnd);
+    for (const [bs, be] of blocks) {
+      if (be <= cursor || bs >= stop) continue;
+      if (bs - cursor >= minMinutes) slots.push([cursor, bs]);
+      cursor = Math.max(cursor, be);
+    }
+    if (stop - cursor >= minMinutes) slots.push([cursor, stop]);
+  }
+  return slots.map(([a, b]) => ({ start: minutesToWall(a), end: minutesToWall(b), minutes: b - a }));
+}
+
 // ------------------------------
 // Helpers
 // ------------------------------
