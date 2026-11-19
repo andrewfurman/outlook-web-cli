@@ -127,7 +127,7 @@ They are credentials: anyone with the file can read that mailbox until the sessi
 | `freebusy --emails a@x.com,b@x.com` | When each person is busy and the slots when everyone is free, like Outlook's Scheduling Assistant. Works for coworkers who haven't shared their calendar (you see busy/tentative/out-of-office, plus subjects only if they share more). Same range flags as `agenda` (`--start-date`/`--end-date` also take times, e.g. `2026-11-17T11:00`); `--day-start 09:00 --day-end 17:00`, `--min-minutes 30`, `--weekends`. Up to 20 people; times are America/New_York. The account defaults to the one matching their email domain |
 | `attachments --id ID` | List attachments, including inline screenshots; `--include-data` returns base64 (`--offset`/`--length` for big files) |
 | `attachment-inspect --id ID` | Describe and transcribe an image attachment with a vision model (`OPENROUTER_API_KEY`) |
-| `draft-new`, `draft-reply`, `draft-delete` | Save, reply to (`--reply-all`, `--add-to`, `--add-cc`) or discard drafts. Requires `--yes` |
+| `draft-new`, `draft-reply`, `draft-delete` | Save, reply to (`--reply-all`, `--add-to`, `--add-cc`) or discard drafts. Requires `--yes`. Formatted HTML emails: see [Writing an HTML email](#writing-an-html-email) |
 
 ### Getting help
 
@@ -163,6 +163,80 @@ Environment settings:
 | `OUTLOOK_WEB_CONFIG_DIR` | Where `config.json` and `sessions/` live (default `~/.config/outlook-web-cli`) |
 | `OPENROUTER_API_KEY`, `OUTLOOK_WEB_VISION_MODEL` | Image model for `attachment-inspect` (default model `google/gemini-2.5-flash`) |
 | `OUTLOOK_INLINE_IMAGE_HOSTS` | Comma-separated hosts that draft inline images may be fetched from (none by default) |
+
+## Writing an HTML email
+
+Drafts are saved as HTML. `--body` is plain text that the CLI converts; `--body-html` (alias `--html`) is used exactly as given. Nothing is ever sent: open the returned `web_link`, review the draft and send it from Outlook.
+
+### Long bodies: put the draft in a JSON file
+
+A formatted email is too long and too full of quotes for one shell argument. Write every field to a JSON file and pass it with `--json` (the same field names as the flags, in snake_case):
+
+```json
+{
+  "account": "work",
+  "to": "oscar@contoso.com,rebecca@contoso.com",
+  "cc": "neill@contoso.com",
+  "subject": "Claims priorities: weekly update (Thu 11/19)",
+  "body_html": "<div style=\"font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:11pt;color:#111827;max-width:820px\"><p>Hi Oscar,</p>...</div>"
+}
+```
+
+```bash
+outlook-web-cli draft-new --json "$(cat draft.json)" --yes
+# reply-all on a thread instead: set "id" (the message to reply to) and "reply_all": true
+outlook-web-cli draft-reply --json "$(cat reply.json)" --yes
+```
+
+Build the JSON with a script (for example Python's `json.dump`) rather than by hand, so quotes and newlines in the HTML are escaped correctly.
+
+### HTML that renders in Outlook
+
+Outlook's renderer ignores most modern CSS. To get the same result in Outlook web, Outlook desktop and phones:
+
+- **Inline styles only.** No `<style>` block, no classes, no `<html>`/`<head>`. Wrap the body in one `<div>` that sets the font (`font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:11pt`) and a `max-width` (about 760–820px).
+- **Tables for anything tabular**, with `border-collapse:collapse` on the table and the full style (font, padding, border) repeated on every `<th>` and `<td>`; cells don't inherit it. A grey row spanning all columns (`colspan`) works as a section heading inside a table.
+- **Plain building blocks:** `<p>`, `<b>`, `<ul>`/`<ol>`, `<a href="https://...">` with absolute URLs, `<br>`. Avoid flexbox, grid, positioning and background images.
+- **Replies:** `draft-reply` puts your HTML above the quoted thread, so write only the new message (greeting, body, sign-off).
+
+### Images: link them, don't attach them
+
+Prefer images hosted on HTTPS and referenced by URL:
+
+```html
+<img src="https://cdn.example.com/2026-11-19/1-policy.png" alt="1. The policy today" width="680"
+     style="display:block;width:100%;max-width:680px;height:auto;border:1px solid #d1d5db;border-radius:6px">
+```
+
+- Hosted images add no attachments, so the email stays small in every recipient's mailbox.
+- They can't be lost when another mail app re-saves the draft. Apple Mail, for example, can drop inline attachments it hasn't finished downloading.
+- Outlook may ask recipients outside your organization to click "Download pictures" first.
+- Anyone with the link can open a hosted image, so only host screenshots that are fine to be public: demo data, no customer details.
+- Check each URL returns 200 before saving the draft.
+
+**Inline (attached) images** are also supported when an image can't be public: pass `inline_images` and reference each one as `cid:` in the HTML. The CLI downloads each image, which must be under 3 MB, from a host listed in `OUTLOOK_INLINE_IMAGE_HOSTS`, and attaches it to the draft:
+
+```json
+"body_html": "... <img src=\"cid:shot1\" width=\"680\" style=\"max-width:680px;height:auto\"> ...",
+"inline_images": [{ "url": "https://cdn.example.com/1-policy.png", "content_id": "shot1", "name": "1-policy.png" }]
+```
+
+```bash
+OUTLOOK_INLINE_IMAGE_HOSTS=cdn.example.com outlook-web-cli draft-new --json "$(cat draft.json)" --yes
+```
+
+**Video (Loom etc.):** put a thumbnail image inside a link to the video, plus a text link above it for clients that block images:
+
+```html
+<p><a href="https://www.loom.com/share/VIDEO_ID">&#9654; Watch the 3-minute video</a></p>
+<a href="https://www.loom.com/share/VIDEO_ID"><img src="https://cdn.example.com/video-thumb.jpg" alt="Watch the video" width="560" style="display:block;max-width:560px;height:auto"></a>
+```
+
+### Check the draft, and change it
+
+- `outlook-web-cli attachments --account work --id DRAFT_ID` lists what's attached: 0 for a hosted-image email, one per `inline_images` entry otherwise.
+- Open `web_link` from the result and read it in Outlook web before sending.
+- A saved draft can't be edited from the CLI. To change one, `draft-delete` it (it goes to Deleted Items) and save a new draft. If someone opened the draft in another mail app, look it up again first (`messages --folder drafts`), because the app may have re-saved it under a new id.
 
 ## Tests
 
