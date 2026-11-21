@@ -61,7 +61,7 @@ Outlook web is a single-page app that signs in with Microsoft's MSAL library. Tw
 | Outlook web's **refresh token** (in the page's local storage) | 24 hours from sign-in (Microsoft's fixed limit for single-page apps) | Redeemed at `login.microsoftonline.com` with Outlook's `Origin`, for a 60–90 minute access token |
 | Microsoft's **sign-in cookies** (`ESTSAUTHPERSISTENT` on `login.microsoftonline.com`) | Months, when "Stay signed in" was chosen | A silent sign-in (`prompt=none` + PKCE), exactly like Outlook web's hidden renewal iframe, gives a new refresh token and renewed cookies |
 
-The access token is for `https://outlook.office.com` with the web app's own `Mail.ReadWrite` and `Calendars` scopes, and calls go to the Outlook REST API. Each call uses the saved access token while it's valid, then the refresh token, then the cookies. Run `outlook-web-cli auth refresh --all --rotate` from cron every few hours to keep the cookies renewed.
+The access token is for `https://outlook.office.com` with the web app's own `Mail.ReadWrite` and `Calendars` scopes, and calls go to the Outlook REST API. Each call uses the saved access token while it's valid, then the refresh token, then the cookies. Run `outlook-web-cli auth refresh --all --rotate` from cron or a systemd timer every 6 hours to keep the cookies renewed. The "Stay signed in" cookie still has a hard expiry that renewing does not extend (`auth status` shows it as `sign_in_cookie_expires`); sign in again before then. [Keeping a session alive](docs/SESSION_REFRESH.md) covers the keep-alive schedule, that expiry, re-signing in on a headless VM over noVNC, and health checks.
 
 ### Import from Chrome
 
@@ -94,6 +94,8 @@ outlook-web-cli auth status          # per account: token minutes left, refresh-
 outlook-web-cli auth refresh --all   # mint fresh tokens now; --rotate also renews the sign-in cookies
 outlook-web-cli auth logout --account work
 ```
+
+For servers and virtual machines, see [Keeping a session alive](docs/SESSION_REFRESH.md).
 
 ## Where things are stored
 
